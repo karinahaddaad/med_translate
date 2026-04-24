@@ -1,0 +1,78 @@
+MEDTRANSLATE - Complete File List for Export
+=============================================
+
+REQUIRED FILES - Copy all of these:
+
+Root Directory:
+  ✓ package.json
+  ✓ vite.config.ts
+  ✓ .gitignore
+  ✓ .env.example
+  ✓ README.md
+  ✓ DEPLOYMENT.md
+  ✓ EXPORT-GUIDE.md
+
+  CREATE THESE (copy from guide):
+  □ index.html (see EXPORT-GUIDE.md for content)
+  □ .env (your API keys - DO NOT commit to git)
+
+src/ directory:
+  ✓ src/main.tsx (CREATED - React entry point)
+
+  src/app/:
+    ✓ src/app/App.tsx (main application)
+
+  src/app/components/:
+    ✓ src/app/components/header.tsx
+    ✓ src/app/components/recorder-button.tsx
+    ✓ src/app/components/transcription-panels.tsx
+    ✓ src/app/components/clinical-summary.tsx
+    ✓ src/app/components/status-bar.tsx
+
+  src/services/:
+    ✓ src/services/api.ts (API integration)
+
+  src/styles/:
+    ✓ src/styles/fonts.css
+    ✓ src/styles/theme.css
+    ✓ src/styles/tailwind.css
+    ✓ src/styles/index.css
+
+OPTIONAL (only if you use shadcn components):
+  src/app/components/ui/ (entire folder)
+
+---
+
+AFTER EXPORT:
+
+1. Create index.html in root:
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MedTranslate</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+2. Create .env file with your API key:
+
+VITE_OPENAI_API_KEY=sk-your-key-here
+
+3. Install and run:
+
+pnpm install
+pnpm run dev
+
+---
+
+TOTAL SIZE: ~50 KB (without node_modules)
+
+After running pnpm install:
+- node_modules will be ~500 MB (auto-downloaded)
+- You can delete node_modules anytime and reinstall
