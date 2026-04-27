@@ -1,150 +1,142 @@
 # MedTranslate
 
-Medical Arabic-to-English speech translation app with real-time transcription and clinical summary extraction.
+Arabic → English medical translation app. Capture a patient session via audio
+or paste Arabic text, send it to a configurable translation API (a fine-tuned
+NLLB Modal deployment in our reference setup), and display the English
+translation alongside live in-browser Arabic transcription.
 
 ## Features
 
-- 🎯 **Two-step workflow**: Clean patient intake → Recording session
-- 👤 **Patient information**: Name, age, gender, MRN with validation
-- 📎 **File upload**: Drag & drop labs, images, and documents
-- 🎤 **Real-time audio recording**: Professional waveform visualization with pause/resume
-- ⏸️ **Recording controls**: Pause, resume, and end recording at any time
-- 🗣️ **Arabic speech transcription**: Powered by Whisper
-- 🌍 **English translation**: Powered by GPT-4
-- 🏥 **Clinical keyword extraction**: Automated tag generation
-- 📋 **Clinical summary generation**: Context-aware summaries
-- 💾 **Export reports**: Complete clinical documentation
-- 🔄 **Multi-session support**: Record multiple sessions per patient
-- 🎨 **Dark clinical UI**: Sleek, professional medical device aesthetic
+- **Patient intake** — collect name, age, gender, MRN, and file attachments before each session
+- **Two translation modes** — toggle between **Audio** (record + send blob) and **Text** (paste Arabic)
+- **Live Arabic transcription** — browser Web Speech API streams Arabic text while recording (Chrome/Edge)
+- **Recording controls** — pause, resume, stop, and re-record
+- **Configurable translation backend** — single env var points to any model that follows the contract below
+- **Cold-start hint** — surfaces a "warming up" notice when the API takes >5s on first request
+- **Export** — bundle Arabic + English + patient info into a clinical report
+- **Demo mode** — falls back to sample data when microphone permission is denied
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Install dependencies
 
 ```bash
 pnpm install
 ```
 
-### 2. Configure Translation Endpoint
-
-Copy `.env.example` to `.env` and set the URL of your deployed translation API:
+### 2. Configure the translation endpoint
 
 ```bash
 cp .env.example .env
 ```
 
 Edit `.env`:
+
 ```env
-VITE_TRANSLATION_ENDPOINT=https://your-modal-app.modal.run/translate
+VITE_TRANSLATION_ENDPOINT=https://your-model.modal.run/translate
 ```
 
-The endpoint must accept:
-- **Text mode** — `POST` with JSON `{ "text": "..." }` and return `{ "translation": "..." }`
-- **Audio mode** — `POST` with `multipart/form-data` (`audio` field) and return `{ "translation": "..." }`
-
-A reference Modal deployment using fine-tuned NLLB-200 lives in `MT_finetunning/` (gitignored).
-
-### 3. Run Locally
+### 3. Run
 
 ```bash
-pnpm run dev
+pnpm dev
 ```
 
-Open http://localhost:5173 in your browser.
+Open http://localhost:5173.
 
-**Note:** Microphone access requires HTTPS in production. Use `localhost` for development.
+> Microphone access requires HTTPS in production. `localhost` is fine for dev.
 
-## Deployment
+## Translation API contract
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
+The UI talks to a single endpoint. Whatever model is behind it determines which
+mode works.
 
-### Quick Deploy
-
-**Vercel:**
-```bash
-npm install -g vercel
-vercel
+**Text mode** — `POST` JSON:
+```json
+{ "text": "النص العربي" }
+```
+Response:
+```json
+{ "translation": "English text" }
 ```
 
-**Netlify:**
-```bash
-npm install -g netlify-cli
-netlify deploy --prod
-```
+**Audio mode** — `POST` `multipart/form-data` with an `audio` field (a `.webm`
+blob from the browser). Response is the same `{ "translation": "..." }` shape.
 
-Add `VITE_TRANSLATION_ENDPOINT` in the deployment platform's environment variables.
+The UI also accepts `{ "result": "..." }` as a fallback response field.
+
+A reference Modal deployment using fine-tuned NLLB-200 lives in
+`MT_finetunning/` (gitignored — not part of the public repo).
 
 ## Architecture
 
 ```
 src/
+├── main.tsx                       # entry
+├── vite-env.d.ts                  # env var typing (VITE_TRANSLATION_ENDPOINT)
 ├── app/
-│   ├── App.tsx              # Main application logic
-│   └── components/          # UI components
+│   ├── App.tsx                    # state, recording flow, mode toggle
+│   └── components/
+│       ├── patient-intake-screen.tsx
+│       ├── patient-info-form.tsx
 │       ├── header.tsx
+│       ├── recording-controls.tsx
 │       ├── recorder-button.tsx
 │       ├── transcription-panels.tsx
 │       ├── clinical-summary.tsx
-│       └── status-bar.tsx
+│       ├── export-button.tsx
+│       ├── status-bar.tsx
+│       └── ui/                    # Radix-based primitives
 ├── services/
-│   └── api.ts               # API integration layer
-└── styles/
-    ├── theme.css            # Design tokens
-    └── fonts.css            # Font imports
+│   └── api.ts                     # translateText, translateAudio, env-var helpers
+└── styles/                        # theme.css, fonts.css, tailwind.css, index.css
 ```
 
-## Security
+**Stack:** React 18 + Vite 6 + TypeScript + Tailwind CSS 4 + Radix UI + MUI.
 
-⚠️ **Client-side API keys are visible to users!**
+## Deployment
 
-For production, use a backend proxy:
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for full instructions.
 
-```
-Browser → Your Backend → OpenAI API
-```
+Quick deploy:
 
-This keeps your API keys secure on the server.
+```bash
+# Vercel
+npx vercel
 
-Example backend (Express):
-
-```javascript
-const express = require('express');
-const OpenAI = require('openai');
-
-const app = express();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-app.post('/api/transcribe', async (req, res) => {
-  const audioFile = req.files.audio;
-  const transcription = await openai.audio.transcriptions.create({
-    file: audioFile,
-    model: 'whisper-1',
-    language: 'ar',
-  });
-  // ... handle translation
-  res.json(result);
-});
-
-app.listen(3000);
+# Netlify
+npx netlify deploy --prod
 ```
 
-Update `.env` to point to your backend:
-```env
-VITE_CUSTOM_API_ENDPOINT=https://yourbackend.com/api/transcribe
-```
+Set `VITE_TRANSLATION_ENDPOINT` in the platform's environment variables before
+deploying.
 
-## Browser Compatibility
+## Security caveats
 
-- ✅ Chrome 88+
-- ✅ Firefox 90+
-- ✅ Safari 14.1+
-- ✅ Edge 88+
+- **Vite bundles `VITE_*` env vars into the client JS at build time.** Your
+  endpoint URL is hidden from the GitHub source but visible to anyone who
+  inspects the deployed app's network tab or JS bundle. Add auth on the
+  translation API (or proxy through a backend you control) if you need to keep
+  it private.
+- **No auth on the translation API by default.** Modal endpoints are publicly
+  callable unless you add token verification.
+- **Patient data is processed client-side and sent to your translation API.**
+  This app is not a HIPAA-compliant medical device — treat it as a research /
+  educational prototype.
 
-Requires `MediaRecorder` API support.
+## Browser compatibility
 
-## Demo Mode
+- ✅ Chrome 88+ — full support including live Arabic transcription
+- ✅ Edge 88+ — full support
+- ⚠️ Firefox 90+ / Safari 14.1+ — recording works; live Arabic transcription
+  unavailable (Web Speech API for Arabic is Chromium-only)
 
-If no API key is configured or microphone access is unavailable, the app runs in demo mode with sample data.
+Requires the `MediaRecorder` API.
+
+## Demo mode
+
+When microphone permission is denied, the app falls back to sample Arabic /
+English content so the UI is still navigable end-to-end.
 
 ## License
 
