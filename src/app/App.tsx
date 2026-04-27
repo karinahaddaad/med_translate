@@ -7,13 +7,14 @@ import { StatusBar } from './components/status-bar';
 import { type PatientInfo } from './components/patient-info-form';
 import { PatientIntakeScreen } from './components/patient-intake-screen';
 import { ExportButton } from './components/export-button';
-import { RotateCcw, AlertCircle, ChevronLeft, Link, CheckCircle2, Pencil } from 'lucide-react';
+import { RotateCcw, AlertCircle, ChevronLeft } from 'lucide-react';
 import {
-  transcribeAndTranslate,
-  isApiConfigured,
-  getStoredEndpoint,
-  setStoredEndpoint,
-  getActiveEndpoint,
+  translateText,
+  translateAudio,
+  isTranslationConfigured,
+  getTranslationMode,
+  setTranslationMode,
+  type TranslationMode,
 } from '../services/api';
 
 type AppState = 'idle' | 'recording' | 'paused' | 'processing' | 'results';
@@ -29,55 +30,34 @@ const SpeechRecognitionAPI =
     ? (window.SpeechRecognition ?? (window as any).webkitSpeechRecognition ?? null)
     : null;
 
-// ─── Ngrok URL bar ────────────────────────────────────────────────────────────
-function OctopusUrlBar({
-  onSave,
+// ─── Audio / Text mode toggle for translation model ──────────────────────────
+function TranslationModeToggle({
+  mode,
+  onChange,
 }: {
-  onSave: (url: string) => void;
+  mode: TranslationMode;
+  onChange: (m: TranslationMode) => void;
 }) {
-  const [editing, setEditing] = useState(!isApiConfigured());
-  const [draft, setDraft]     = useState(getActiveEndpoint());
-  const active                = getActiveEndpoint();
-
-  const save = () => {
-    setStoredEndpoint(draft);
-    onSave(draft);
-    setEditing(false);
-  };
-
-  if (!editing && active) {
-    return (
-      <div className="w-full max-w-6xl flex items-center gap-3 px-4 py-2.5 bg-primary/10 border border-primary/30 rounded-lg font-['IBM_Plex_Mono'] text-xs mb-2">
-        <CheckCircle2 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-        <span className="text-primary flex-1 truncate">Octopus: {active}</span>
-        <button onClick={() => setEditing(true)} className="text-muted-foreground hover:text-foreground transition-colors">
-          <Pencil className="w-3.5 h-3.5" />
+  const baseBtn  = "px-3 py-1.5 font-['IBM_Plex_Mono'] text-xs transition-colors";
+  const active   = "bg-primary text-primary-foreground";
+  const inactive = "bg-card text-muted-foreground hover:text-foreground";
+  return (
+    <div className="w-full max-w-6xl flex items-center gap-2 mb-2 font-['IBM_Plex_Mono'] text-xs">
+      <span className="text-muted-foreground">Translation input:</span>
+      <div className="inline-flex border border-border rounded-lg overflow-hidden">
+        <button
+          onClick={() => onChange('audio')}
+          className={`${baseBtn} ${mode === 'audio' ? active : inactive}`}
+        >
+          Audio
+        </button>
+        <button
+          onClick={() => onChange('text')}
+          className={`${baseBtn} ${mode === 'text' ? active : inactive}`}
+        >
+          Text
         </button>
       </div>
-    );
-  }
-
-  return (
-    <div className="w-full max-w-6xl flex items-center gap-2 mb-2">
-      <div className="flex items-center gap-2 flex-1 px-3 py-2 bg-card border border-border rounded-lg">
-        <Link className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-        <input
-          type="url"
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && save()}
-          placeholder="Paste your ngrok URL — https://abc123.ngrok-free.app"
-          className="flex-1 bg-transparent font-['IBM_Plex_Mono'] text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
-          autoFocus
-        />
-      </div>
-      <button
-        onClick={save}
-        disabled={!draft.trim()}
-        className="px-3 py-2 bg-primary text-primary-foreground rounded-lg font-['IBM_Plex_Mono'] text-xs hover:bg-primary/90 transition-all disabled:opacity-50"
-      >
-        Connect
-      </button>
     </div>
   );
 }
@@ -96,8 +76,9 @@ export default function App() {
   const [englishText, setEnglishText]   = useState('');
   const [keywords, setKeywords]         = useState<string[]>([]);
   const [summary, setSummary]           = useState('');
-  // triggers re-render when URL is saved so the bar and status update
-  const [, forceUpdate]                 = useState(0);
+  const [translationMode, setTransMode] = useState<TranslationMode>(getTranslationMode());
+  const [textInput, setTextInput]       = useState('');
+  const [showColdStartHint, setShowColdStartHint] = useState(false);
   const [patientInfo, setPatientInfo]   = useState<PatientInfo>({
     name: '', age: '', gender: '', medicalRecordNumber: '', attachments: [],
   });
@@ -122,6 +103,13 @@ export default function App() {
     const m = Math.floor(seconds / 60), s = seconds % 60;
     setSessionTime(`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
   }, [seconds]);
+
+  // ─── Cold-start hint (Modal containers can take 30–60s on first request) ──
+  useEffect(() => {
+    if (state !== 'processing') { setShowColdStartHint(false); return; }
+    const t = window.setTimeout(() => setShowColdStartHint(true), 5000);
+    return () => clearTimeout(t);
+  }, [state]);
 
   // ─── Speech recognition ────────────────────────────────────────────────────
   const startRecognitionSession = () => {
@@ -177,30 +165,24 @@ export default function App() {
       setAudioBlob(blob);
       streamRef.current?.getTracks().forEach(t => t.stop());
       const captured = arabicTextRef.current;
+      setArabicText(captured);
 
-      if (isApiConfigured()) {
+      if (isTranslationConfigured()) {
         setState('processing');
         try {
-          const result = await transcribeAndTranslate(blob, captured, {
-            name: patientInfo.name, age: patientInfo.age,
-            gender: patientInfo.gender, medicalRecordNumber: patientInfo.medicalRecordNumber,
-          });
-          setArabicText(result.arabicText);
-          setEnglishText(result.englishText);
-          setKeywords(result.keywords);
-          setSummary(result.summary);
+          const english = await translateAudio(blob);
+          setEnglishText(english);
+          setKeywords([]);
+          setSummary('');
         } catch (err) {
           console.error('API error:', err);
           const msg = err instanceof Error ? err.message : 'API call failed';
           setError(msg);
-          setArabicText(captured);
-          // Show the error inside the English panel so it's visible
           setEnglishText('');
           setKeywords([]);
           setSummary('');
         }
       } else {
-        setArabicText(captured);
         setEnglishText('');
         setKeywords([]);
         setSummary('');
@@ -256,7 +238,32 @@ export default function App() {
     setState('idle'); setSeconds(0); setSessionTime('00:00');
     setAudioBlob(null); setError(null); setUseMockMode(false);
     setArabicText(''); setEnglishText(''); setKeywords([]); setSummary('');
+    setTextInput('');
     savedTranscriptRef.current = ''; arabicTextRef.current = '';
+  };
+
+  // ─── Text-only translation (skips recording / ASR) ─────────────────────────
+  const handleTextTranslate = async () => {
+    const input = textInput.trim();
+    if (!input) return;
+    setError(null);
+    setEnglishText(''); setKeywords([]); setSummary('');
+    setState('processing');
+    try {
+      const english = await translateText(input);
+      setEnglishText(english);
+    } catch (err) {
+      console.error('Text translation error:', err);
+      setError(err instanceof Error ? err.message : 'Translation failed');
+      setEnglishText('');
+    }
+    setState('results');
+  };
+
+  const handleModeChange = (m: TranslationMode) => {
+    setTranslationMode(m);
+    setTransMode(m);
+    resetRecording();
   };
 
   const handleBackToIntake  = () => { resetRecording(); setWorkflowStep('intake'); };
@@ -267,7 +274,7 @@ export default function App() {
     setWorkflowStep('intake');
   };
 
-  const apiReady  = isApiConfigured();
+  const apiReady  = isTranslationConfigured();
   const isLoading = state === 'processing';
 
   // ─── Intake screen ─────────────────────────────────────────────────────────
@@ -300,8 +307,11 @@ export default function App() {
           </button>
         </div>
 
-        {/* Ngrok / Octopus URL bar */}
-        <OctopusUrlBar onSave={() => forceUpdate(n => n + 1)} />
+        {/* Translation input mode toggle */}
+        <TranslationModeToggle
+          mode={translationMode}
+          onChange={handleModeChange}
+        />
 
         <Header sessionTime={sessionTime} />
 
@@ -339,25 +349,52 @@ export default function App() {
             </div>
           )}
 
-          {!SpeechRecognitionAPI && state === 'idle' && !useMockMode && (
+          {state === 'processing' && showColdStartHint && (
+            <div className="font-['IBM_Plex_Mono'] text-xs text-muted-foreground text-center max-w-md">
+              Warming up the model — first request can take 30–60s.
+            </div>
+          )}
+
+          {translationMode === 'audio' && !SpeechRecognitionAPI && state === 'idle' && !useMockMode && (
             <p className="font-['IBM_Plex_Mono'] text-xs text-amber-500 text-center max-w-sm">
-              Live transcription requires Chrome or Edge. Other browsers can still record and send audio to Octopus.
+              Live transcription requires Chrome or Edge. Other browsers can still record and send audio to the translation API.
             </p>
           )}
 
-          <RecordingControls
-            state={state}
-            onStart={handleStartRecording}
-            onPause={handlePauseRecording}
-            onResume={handleResumeRecording}
-            onStop={handleStopRecording}
-          />
+          {translationMode === 'audio' ? (
+            <RecordingControls
+              state={state}
+              onStart={handleStartRecording}
+              onPause={handlePauseRecording}
+              onResume={handleResumeRecording}
+              onStop={handleStopRecording}
+            />
+          ) : (
+            <div className="w-full max-w-2xl flex flex-col gap-3">
+              <textarea
+                value={textInput}
+                onChange={e => setTextInput(e.target.value)}
+                placeholder="اكتب النص العربي هنا..."
+                dir="rtl"
+                rows={5}
+                disabled={state === 'processing'}
+                className="w-full px-4 py-3 bg-card border border-border rounded-lg font-['Lora'] text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-y disabled:opacity-50"
+              />
+              <button
+                onClick={handleTextTranslate}
+                disabled={!textInput.trim() || state === 'processing'}
+                className="self-center px-6 py-3 bg-primary text-primary-foreground rounded-lg font-['IBM_Plex_Mono'] text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {state === 'processing' ? 'Translating…' : 'Translate'}
+              </button>
+            </div>
+          )}
 
-          {useMockMode && state !== 'idle' && state !== 'results' && (
+          {translationMode === 'audio' && useMockMode && state !== 'idle' && state !== 'results' && (
             <div className="font-['IBM_Plex_Mono'] text-xs text-muted-foreground">(Demo Mode)</div>
           )}
 
-          {audioBlob && state === 'results' && (
+          {translationMode === 'audio' && audioBlob && state === 'results' && (
             <div className="font-['IBM_Plex_Mono'] text-xs text-muted-foreground">
               {useMockMode ? 'Demo recording' : `Recorded: ${(audioBlob.size / 1024).toFixed(1)} KB`}
             </div>
@@ -368,13 +405,16 @@ export default function App() {
             englishText={englishText}
             isLoading={isLoading}
             apiReady={apiReady}
+            hideArabic={translationMode === 'text'}
           />
 
-          <ClinicalSummary
-            keywords={keywords}
-            summary={summary}
-            isLoading={isLoading}
-          />
+          {translationMode === 'audio' && (
+            <ClinicalSummary
+              keywords={keywords}
+              summary={summary}
+              isLoading={isLoading}
+            />
+          )}
 
           {state === 'results' && (
             <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3">
@@ -405,9 +445,9 @@ export default function App() {
 
         <StatusBar
           modelName={
-            useMockMode  ? 'Demo Mode'          :
-            apiReady     ? 'Octopus (ArabicSpeech)' :
-                           'Browser Speech API (Arabic live)'
+            useMockMode ? 'Demo Mode' :
+            apiReady    ? 'Translation API' :
+                          'API not configured'
           }
           isConnected={state === 'recording' || state === 'processing'}
         />

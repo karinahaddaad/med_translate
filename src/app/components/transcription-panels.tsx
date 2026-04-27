@@ -5,10 +5,24 @@ interface TranscriptionPanelsProps {
   englishText: string;
   isLoading: boolean;
   apiReady?: boolean;
+  hideArabic?: boolean;
 }
 
-export function TranscriptionPanels({ arabicText, englishText, isLoading, apiReady }: TranscriptionPanelsProps) {
+export function TranscriptionPanels({ arabicText, englishText, isLoading, apiReady, hideArabic }: TranscriptionPanelsProps) {
   const showApiNotice = !apiReady && arabicText && !englishText && !isLoading;
+
+  if (hideArabic) {
+    return (
+      <div className="w-full max-w-6xl">
+        <Panel
+          title="English Translation"
+          content={englishText}
+          isItalic
+          isLoading={isLoading}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-6xl">

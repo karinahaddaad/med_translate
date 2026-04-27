@@ -25,9 +25,9 @@ Medical Arabic-to-English speech translation app with real-time transcription an
 pnpm install
 ```
 
-### 2. Configure API Keys
+### 2. Configure Translation Endpoint
 
-Copy `.env.example` to `.env` and add your OpenAI API key:
+Copy `.env.example` to `.env` and set the URL of your deployed translation API:
 
 ```bash
 cp .env.example .env
@@ -35,8 +35,14 @@ cp .env.example .env
 
 Edit `.env`:
 ```env
-VITE_OPENAI_API_KEY=sk-your-key-here
+VITE_TRANSLATION_ENDPOINT=https://your-modal-app.modal.run/translate
 ```
+
+The endpoint must accept:
+- **Text mode** — `POST` with JSON `{ "text": "..." }` and return `{ "translation": "..." }`
+- **Audio mode** — `POST` with `multipart/form-data` (`audio` field) and return `{ "translation": "..." }`
+
+A reference Modal deployment using fine-tuned NLLB-200 lives in `MT_finetunning/` (gitignored).
 
 ### 3. Run Locally
 
@@ -66,49 +72,7 @@ npm install -g netlify-cli
 netlify deploy --prod
 ```
 
-Add your `VITE_OPENAI_API_KEY` in the deployment platform's environment variables.
-
-## API Options
-
-### Option 1: OpenAI (Default)
-
-```env
-VITE_OPENAI_API_KEY=sk-...
-```
-
-Models used:
-- `whisper-1` for transcription
-- `gpt-4` for translation & clinical extraction
-
-### Option 2: Azure OpenAI
-
-```env
-VITE_AZURE_OPENAI_KEY=your-key
-VITE_AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-VITE_AZURE_DEPLOYMENT_NAME=your-deployment
-```
-
-Update `src/app/App.tsx` to import `transcribeAndTranslateAzure` instead.
-
-### Option 3: Custom API
-
-```env
-VITE_CUSTOM_API_ENDPOINT=https://your-api.com/transcribe
-VITE_CUSTOM_API_KEY=your-key
-```
-
-Your API should accept `FormData` with an `audio` field and return:
-
-```json
-{
-  "arabicText": "...",
-  "englishText": "...",
-  "keywords": ["...", "..."],
-  "summary": "..."
-}
-```
-
-Update `src/app/App.tsx` to import `transcribeAndTranslateCustom` instead.
+Add `VITE_TRANSLATION_ENDPOINT` in the deployment platform's environment variables.
 
 ## Architecture
 

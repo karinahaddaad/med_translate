@@ -1,100 +1,69 @@
-// ─── When you have a stable endpoint, hardcode it here ───────────────────────
-// Otherwise leave empty — you can paste the ngrok URL in the app UI each session
-export const YOUR_API_ENDPOINT = ''; // e.g. 'https://abc123.ngrok-free.app'
-export const YOUR_API_KEY      = ''; // leave empty — ngrok doesn't need auth
-// ─────────────────────────────────────────────────────────────────────────────
+// Translation model endpoint — read from .env (VITE_TRANSLATION_ENDPOINT).
+// Falls back to empty string so the UI surfaces a clear "not configured" error
+// instead of fetching `undefined`.
+export const TRANSLATION_ENDPOINT: string = import.meta.env.VITE_TRANSLATION_ENDPOINT ?? '';
 
-const STORAGE_KEY = 'medtrans_octopus_url';
+const TRANSLATION_MODE_KEY = 'medtrans_translation_mode';
 
-export function getStoredEndpoint(): string {
-  try { return localStorage.getItem(STORAGE_KEY) ?? ''; } catch { return ''; }
+export type TranslationMode = 'audio' | 'text';
+
+export function getActiveTranslationEndpoint(): string {
+  return TRANSLATION_ENDPOINT;
 }
 
-export function setStoredEndpoint(url: string): void {
-  try { localStorage.setItem(STORAGE_KEY, url.trim()); } catch {}
+export function isTranslationConfigured(): boolean {
+  return TRANSLATION_ENDPOINT.length > 0;
 }
 
-export function getActiveEndpoint(): string {
-  return YOUR_API_ENDPOINT.trim() || getStoredEndpoint();
+export function getTranslationMode(): TranslationMode {
+  try {
+    const v = localStorage.getItem(TRANSLATION_MODE_KEY);
+    return v === 'text' ? 'text' : 'audio';
+  } catch { return 'audio'; }
 }
 
-export function isApiConfigured(): boolean {
-  return getActiveEndpoint().length > 0;
+export function setTranslationMode(mode: TranslationMode): void {
+  try { localStorage.setItem(TRANSLATION_MODE_KEY, mode); } catch {}
 }
 
-export interface TranscriptionResult {
-  arabicText: string;
-  englishText: string;
-  keywords: string[];
-  summary: string;
-}
-
-export interface PatientContext {
-  name?: string;
-  age?: string;
-  gender?: string;
-  medicalRecordNumber?: string;
-}
-
-// Calls the Octopus FastAPI server (POST /transcribe, returns { result: string })
-async function callOctopus(
-  baseUrl: string,
-  audioBlob: Blob,
-  task: 'asr' | 'translation'
+// Posts to the translation endpoint and parses { translation } or { result }.
+async function postTranslation(
+  body: BodyInit,
+  extraHeaders: Record<string, string>,
+  modeLabel: string,
 ): Promise<string> {
-  const formData = new FormData();
-  formData.append('audio', audioBlob, 'audio.webm');
-  formData.append('task', task);
+  const url = getActiveTranslationEndpoint();
+  if (!url) throw new Error('No translation endpoint configured. Set VITE_TRANSLATION_ENDPOINT in .env.');
 
-  const headers: Record<string, string> = {
-    'ngrok-skip-browser-warning': 'true', // required — ngrok blocks browser requests without this
-  };
-  if (YOUR_API_KEY) headers['Authorization'] = `Bearer ${YOUR_API_KEY}`;
-
-  const res = await fetch(`${baseUrl.replace(/\/$/, '')}/transcribe`, {
+  const res = await fetch(url, {
     method: 'POST',
-    headers,
-    body: formData,
+    headers: { 'ngrok-skip-browser-warning': 'true', ...extraHeaders },
+    body,
   });
 
   if (!res.ok) {
     let msg = res.statusText;
     try { const e = await res.json(); msg = e.error ?? e.message ?? msg; } catch {}
-    throw new Error(`Octopus API error (${task}): ${msg}`);
+    throw new Error(`Translation API error (${modeLabel}): ${msg}`);
   }
 
   const data = await res.json();
-  // Octopus server returns { result: "text" }
-  return (data.result ?? data.arabicText ?? data.englishText ?? '') as string;
+  return (data.translation ?? data.result ?? '') as string;
 }
 
-// Makes two sequential calls: asr (Arabic) first, then translation (English)
-export async function transcribeAndTranslate(
-  audioBlob: Blob,
-  browserTranscript: string,      // live Web Speech API text — used as fallback
-  _patientContext?: PatientContext // reserved for future use
-): Promise<TranscriptionResult> {
-  const endpoint = getActiveEndpoint();
-  if (!endpoint) throw new Error('No API endpoint configured. Paste your ngrok URL in the app.');
+// Audio → English (multipart FormData with the audio blob).
+// For audio-capable models that accept POST multipart with an `audio` field.
+export async function translateAudio(audioBlob: Blob): Promise<string> {
+  const fd = new FormData();
+  fd.append('audio', audioBlob, 'audio.webm');
+  return postTranslation(fd, {}, 'audio');
+}
 
-  // ASR first — fall back to browser transcript if it fails
-  let arabicText = browserTranscript;
-  try {
-    arabicText = await callOctopus(endpoint, audioBlob, 'asr') || browserTranscript;
-    console.log('[Octopus ASR]', arabicText);
-  } catch (err) {
-    console.error('[Octopus ASR failed]', err);
-  }
-
-  // Translation — throw so the UI can surface the real error message
-  let englishText = '';
-  try {
-    englishText = await callOctopus(endpoint, audioBlob, 'translation');
-    console.log('[Octopus translation]', englishText);
-  } catch (err) {
-    console.error('[Octopus translation failed]', err);
-    throw err; // surface this to the UI
-  }
-
-  return { arabicText, englishText, keywords: [], summary: '' };
+// Arabic text → English (JSON body).
+export async function translateText(arabicText: string): Promise<string> {
+  return postTranslation(
+    JSON.stringify({ text: arabicText, source_lang: 'ar', target_lang: 'en' }),
+    { 'Content-Type': 'application/json' },
+    'text',
+  );
 }
