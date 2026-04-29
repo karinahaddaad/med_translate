@@ -1,143 +1,71 @@
+<div align="center">
+
+<br/>
+
 # MedTranslate
 
-Arabic → English medical translation app. Capture a patient session via audio
-or paste Arabic text, send it to a configurable translation API (a fine-tuned
-NLLB Modal deployment in our reference setup), and display the English
-translation alongside live in-browser Arabic transcription.
+**Dialect-aware, medically-fluent Arabic → English translation.**
 
-## Features
+*Relieving doctors. Reaching patients.*
 
-- **Patient intake** — collect name, age, gender, MRN, and file attachments before each session
-- **Two translation modes** — toggle between **Audio** (record + send blob) and **Text** (paste Arabic)
-- **Live Arabic transcription** — browser Web Speech API streams Arabic text while recording (Chrome/Edge)
-- **Recording controls** — pause, resume, stop, and re-record
-- **Configurable translation backend** — single env var points to any model that follows the contract below
-- **Cold-start hint** — surfaces a "warming up" notice when the API takes >5s on first request
-- **Export** — bundle Arabic + English + patient info into a clinical report
-- **Demo mode** — falls back to sample data when microphone permission is denied
+<br/>
 
-## Quick Start
+[![BLEU Baseline](https://img.shields.io/badge/Baseline%20BLEU-20.99-gray?style=flat-square)](.)
+[![BLEU Finetuned](https://img.shields.io/badge/Fine--tuned%20BLEU-35.16-C8A84B?style=flat-square)](.)
+[![ROUGE-L](https://img.shields.io/badge/ROUGE--L-0.681-1E4FC2?style=flat-square)](.)
 
-### 1. Install dependencies
+</div>
 
-```bash
-pnpm install
-```
+---
 
-### 2. Configure the translation endpoint
+## Where we fit in
 
-```bash
-cp .env.example .env
-```
+Arabic-speaking patients walk into clinics every day and leave without fully understanding their diagnosis. On the other side of that encounter, doctors are spending significant time on documentation and translation on top of note-taking — hours per day that belong to patient care, not paperwork.
 
-Edit `.env`:
+Commercial translation tools weren't built for this. They weren't trained on medical language, they don't understand clinical context, and they certainly don't account for the difference between how a patient in Cairo speaks versus one in Riyadh or Beirut. The result is a gap that the market hasn't filled, because the communities who need it most are the least represented in training data.
 
-```env
-VITE_TRANSLATION_ENDPOINT=https://your-model.modal.run/translate
-```
+We built a two-stage pipeline that listens to Arabic patient speech, transcribes it in real time, and produces accurate, dialect-aware medical translations — outputs that work for doctor documentation and for patients receiving notes in a language they actually understand. The system is fine-tuned specifically for the medical domain, covering clinical terminology, conversational Arabic, and regional dialect variation across Gulf, Levantine, and Egyptian speech.
 
-### 3. Run
+---
 
-```bash
-pnpm dev
-```
-
-Open http://localhost:5173.
-
-> Microphone access requires HTTPS in production. `localhost` is fine for dev.
-
-## Translation API contract
-
-The UI talks to a single endpoint. Whatever model is behind it determines which
-mode works.
-
-**Text mode** — `POST` JSON:
-```json
-{ "text": "النص العربي" }
-```
-Response:
-```json
-{ "translation": "English text" }
-```
-
-**Audio mode** — `POST` `multipart/form-data` with an `audio` field (a `.webm`
-blob from the browser). Response is the same `{ "translation": "..." }` shape.
-
-The UI also accepts `{ "result": "..." }` as a fallback response field.
-
-A reference Modal deployment using fine-tuned NLLB-200 lives in
-`MT_finetunning/` (gitignored — not part of the public repo).
-
-## Architecture
+## How it works
 
 ```
-src/
-├── main.tsx                       # entry
-├── vite-env.d.ts                  # env var typing (VITE_TRANSLATION_ENDPOINT)
-├── app/
-│   ├── App.tsx                    # state, recording flow, mode toggle
-│   └── components/
-│       ├── patient-intake-screen.tsx
-│       ├── patient-info-form.tsx
-│       ├── header.tsx
-│       ├── recording-controls.tsx
-│       ├── recorder-button.tsx
-│       ├── transcription-panels.tsx
-│       ├── clinical-summary.tsx
-│       ├── export-button.tsx
-│       ├── status-bar.tsx
-│       └── ui/                    # Radix-based primitives
-├── services/
-│   └── api.ts                     # translateText, translateAudio, env-var helpers
-└── styles/                        # theme.css, fonts.css, tailwind.css, index.css
+Patient speaks Arabic
+        │
+        ▼
+┌───────────────────┐
+│  Speech           │  Fine-tuned on medical Arabic audio.
+│  Recognition      │  Handles Gulf, Levantine, Egyptian dialects.
+│  (ASR)            │  Real-time transcription, low latency.
+└────────┬──────────┘
+         │  Arabic text
+         ▼
+┌───────────────────┐
+│  Medical Machine  │  Domain-adapted on proprietary medical corpora.
+│  Translation      │  Trained on clinical terminology + conversational Arabic.
+│  (MT)             │  Arabic → English
+└────────┬──────────┘
+         │  Clinical English
+         ▼
+  Doctor notes + patient summaries
 ```
 
-**Stack:** React 18 + Vite 6 + TypeScript + Tailwind CSS 4 + Radix UI + MUI.
+---
 
-## Deployment
+## Results
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for full instructions.
+Benchmarked on a held-out gold test set — data the model has never seen. These are generalization numbers, not training performance.
 
-Quick deploy:
+| | Baseline | Fine-tuned | Δ |
+|---|---|---|---|
+| **BLEU** | 20.99 | **35.16** | +14.17 |
+| **ROUGE-L** | 0.547 | **0.681** | +0.135 |
 
-```bash
-# Vercel
-npx vercel
+Every medical category improved after fine-tuning.
 
-# Netlify
-npx netlify deploy --prod
-```
+---
 
-Set `VITE_TRANSLATION_ENDPOINT` in the platform's environment variables before
-deploying.
+## Why this matters
 
-## Security caveats
-
-- **Vite bundles `VITE_*` env vars into the client JS at build time.** Your
-  endpoint URL is hidden from the GitHub source but visible to anyone who
-  inspects the deployed app's network tab or JS bundle. Add auth on the
-  translation API (or proxy through a backend you control) if you need to keep
-  it private.
-- **No auth on the translation API by default.** Modal endpoints are publicly
-  callable unless you add token verification.
-- **Patient data is processed client-side and sent to your translation API.**
-  This app is not a HIPAA-compliant medical device — treat it as a research /
-  educational prototype.
-
-## Browser compatibility
-
-- ✅ Chrome 88+ — full support including live Arabic transcription
-- ✅ Edge 88+ — full support
-- ⚠️ Firefox 90+ / Safari 14.1+ — recording works; live Arabic transcription
-  unavailable (Web Speech API for Arabic is Chromium-only)
-
-Requires the `MediaRecorder` API.
-
-## Demo mode
-
-When microphone permission is denied, the app falls back to sample Arabic /
-English content so the UI is still navigable end-to-end.
-
-## License
-
-MIT
+400M+ people speak Arabic. The communities who need this most — patients navigating healthcare in a language their doctors don't share — are the ones least represented in existing training data. Less data means fewer tools. Fewer tools means patients stay underserved. We're breaking that loop.
